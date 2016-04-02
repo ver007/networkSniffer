@@ -58,7 +58,7 @@ except socket.error , msg:
 
 print "Socket Created"
 #Important constants for use in the code
-VALUE_MB_BYTES = 8*1024*1024
+VALUE_MB_BYTES = 1024*1024
  
 # Get the last saved data from the storage
 storeFile = "analytics.txt"
