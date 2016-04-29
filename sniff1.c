@@ -1,21 +1,58 @@
 /*
     Packet sniffer using libpcap library
 */
-#include<pcap.h>
-#include<stdio.h>
-#include<stdlib.h> // for exit()
-#include<string.h> //for memset
- 
-#include<sys/socket.h>
-#include<arpa/inet.h> // for inet_ntoa()
-#include<net/ethernet.h>
-#include<netinet/ip_icmp.h>   //Provides declarations for icmp header
-#include<netinet/udp.h>   //Provides declarations for udp header
-#include<netinet/tcp.h>   //Provides declarations for tcp header
-#include<netinet/ip.h>    //Provides declarations for ip header
+#include <pcap.h>
+#include <stdio.h>
+#include <stdlib.h> // for exit()
+#include <string.h> //for memset
+#include <unistd.h>
+
+#include <sys/socket.h>
+#include <arpa/inet.h> // for inet_ntoa()
+#include <net/ethernet.h>
+#include <netinet/ip_icmp.h>   //Provides declarations for icmp header
+#include <netinet/udp.h>   //Provides declarations for udp header
+#include <netinet/tcp.h>   //Provides declarations for tcp header
+#include <netinet/ip.h>    //Provides declarations for ip header
+#include <pthread.h>
+#include <semaphore.h>
 
 #define BYTES_IN_MB   (1024*1024)
+#define MAX_MAC_COUNT (50)
+#define MAC_LENGTH    (6)
+/*
+  Synchronization declarations
+*/
+typedef struct{
+  unsigned int dataGB;
+  unsigned int dataMB;
+  unsigned int dataBYTES;
+}dataHolder;
 
+typedef struct{
+  u_char mac[MAC_LENGTH];
+  dataHolder data;
+}DestMACDataHolder;
+
+typedef struct{
+  char mac[MAC_LENGTH];
+  dataHolder data;
+}SrcMACDataHolder;
+
+DestMACDataHolder destMACs[MAX_MAC_COUNT] = {0};
+SrcMACDataHolder srcMACs[MAX_MAC_COUNT] = {0};
+
+int destMacTotal = 0;
+int srcMacTotal = 0;
+sem_t bin_sem;
+FILE *backUpFile;
+int savesize;
+
+void *backUp_thread(void *arg);
+
+/*
+  Networking declarations
+*/
 void process_packet(u_char *, const struct pcap_pkthdr *, const u_char *);
 void process_ip_packet(const u_char * , int);
 void print_ip_packet(const u_char * , int);
@@ -37,6 +74,29 @@ int main()
     char errbuf[100] , *devname , devs[100][100];
     int count = 1 , n;
      
+
+  /*
+    Setup synchrnization elements
+  */
+    int res;
+    pthread_t a_thread;
+    void *thread_result;
+
+    res = sem_init(&bin_sem, 0, 1);
+    if (res != 0) {
+        perror("Semaphore initialization failed");
+        exit(EXIT_FAILURE);
+    }
+    res = pthread_create(&a_thread, NULL, backUp_thread, NULL);
+    if (res != 0) {
+        perror("Thread creation failed");
+        exit(EXIT_FAILURE);
+    }
+
+
+  /*
+    Setup synchrnization elements
+  */
     //First get the list of available devices
     printf("Finding available devices ... ");
     if( pcap_findalldevs( &alldevsp , errbuf) )
@@ -83,16 +143,93 @@ int main()
     //Put the device in sniff loop
     pcap_loop(handle , -1 , process_packet , NULL);
     
-    printf("\nThe End of the program.\n");
-    return 0;   
+    printf("\nWaiting for thread to finish...\n");
+    res = pthread_join(a_thread, &thread_result);
+    if (res != 0) {
+        perror("Thread join failed");
+        exit(EXIT_FAILURE);
+    }
+    printf("Thread joined\n");
+    sem_destroy(&bin_sem);
+    exit(EXIT_SUCCESS);
+    //return 0;   
+}
+
+void *backUp_thread(void *arg) {
+    int i;
+    while(1)
+    {
+      sleep(3);
+      sem_wait(&bin_sem);
+      //printf("Saving in file\n");
+      backUpFile=fopen("log.txt","w");
+      for(i = 0 ; i < destMacTotal ; i++)
+      {
+        //fprintf(backUpFile, "%s\t", destMACs[i].mac, MAC_LENGTH);
+        fprintf(backUpFile,"%.2X-%.2X-%.2X-%.2X-%.2X-%.2X:\t",destMACs[i].mac[0],destMACs[i].mac[1],destMACs[i].mac[2],destMACs[i].mac[3],destMACs[i].mac[4],destMACs[i].mac[5]);
+        fprintf(backUpFile,"%d MB | %d Bytes\n",destMACs[i].data.dataMB, destMACs[i].data.dataBYTES);
+
+      }
+      
+      sem_post(&bin_sem);
+      fclose(backUpFile);
+    }
+    // if(logfile==NULL) 
+    // {
+    //     printf("Unable to create file.");
+    // }
+    pthread_exit(NULL);
+}
+
+int isMACExists(u_char *mac)
+{
+    //int result = 0;
+    int i, j;
+    for( j = 0; j < destMacTotal ; j++)
+    {
+      //printf("%d-%d-%d-%d-%d-%d *\n%d-%d-%d-%d-%d-%d\n",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5],destMACs[j].mac[0],destMACs[j].mac[1],destMACs[j].mac[2],destMACs[j].mac[3],destMACs[j].mac[4],destMACs[j].mac[5]);
+      for(i = 0; i < MAC_LENGTH ; i++)
+      {
+          //printf("===%d===",destMACs[j].mac[i] ^ mac[i]);
+          if((destMACs[j].mac[i] ^ mac[i]) != 0)
+              break;
+      }
+      if(i == MAC_LENGTH)
+          break;
+    }
+    return j;
 }
  
 void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *buffer)
 {
+    //sleep(2);
+    int index;
+    u_char mac[MAC_LENGTH];
     int size = header->len;
     allData[1] += (size + allData[0]) / BYTES_IN_MB;
     allData[0] = (size + allData[0]) % BYTES_IN_MB;
 
+    struct ethhdr *eth = (struct ethhdr *)buffer;
+    //printf("%.2X-%.2X-%.2X-%.2X-%.2X-%.2X \n", eth->h_dest[0] , eth->h_dest[1] , eth->h_dest[2] , eth->h_dest[3] , eth->h_dest[4] , eth->h_dest[5] );
+    //printf("%d-%d-%d-%d-%d-%d***\n",eth->h_dest[0] , eth->h_dest[1] , eth->h_dest[2] , eth->h_dest[3] , eth->h_dest[4] , eth->h_dest[5] );
+    strncpy(mac,eth->h_dest,MAC_LENGTH);
+    index = isMACExists(mac);
+    
+    sem_wait(&bin_sem);
+    if(index < destMacTotal)
+    {
+        destMACs[index].data.dataMB += (destMACs[index].data.dataBYTES + size) / BYTES_IN_MB;
+        destMACs[index].data.dataBYTES = (destMACs[index].data.dataBYTES + size) % BYTES_IN_MB;
+    }
+    else
+    {
+        //printf("Adding new MAC\n");
+        strncpy(destMACs[index].mac,mac,MAC_LENGTH);
+        destMACs[index].data.dataMB += (destMACs[index].data.dataBYTES + size) / BYTES_IN_MB;
+        destMACs[index].data.dataBYTES = (destMACs[index].data.dataBYTES + size) % BYTES_IN_MB;
+        destMacTotal++;
+    }
+    sem_post(&bin_sem);
     //Get the IP Header part of this packet , excluding the ethernet header
     struct iphdr *iph = (struct iphdr*)(buffer + sizeof(struct ethhdr));
     ++total;
@@ -122,7 +259,7 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
             break;
     }
     //printf("TCP : %d   UDP : %d   ICMP : %d   IGMP : %d   Others : %d   Total : %d   Data:%d\r", tcp , udp , icmp , igmp , others , total, allData[1]);
-    printf("TCP : %d   UDP : %d   ICMP : %d   IGMP : %d   Total : %d   Data:%d\r", tcp , udp , icmp , igmp , total, allData[1]);
+    //printf("TCP : %d   UDP : %d   ICMP : %d   IGMP : %d   Total : %d   Data:%d\r", tcp , udp , icmp , igmp , total, allData[1]);
 }
  
 void print_ethernet_header(const u_char *Buffer, int Size)
