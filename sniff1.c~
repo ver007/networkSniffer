@@ -66,7 +66,7 @@ struct sockaddr_in source,dest;
 int tcp=0,udp=0,icmp=0,others=0,igmp=0,total=0,i,j;
 u_int allData[2] = {0,0}; 
  
-int main(int argc, char *argv[])
+int main()
 {
     pcap_if_t *alldevsp , *device;
     pcap_t *handle; //Handle of the device that shall be sniffed
@@ -104,31 +104,24 @@ int main(int argc, char *argv[])
         printf("Error finding devices : %s" , errbuf);
         exit(1);
     }
-    printf("Done\n");
+    printf("Done");
      
     //Print the available devices
-    //printf("\nAvailable Devices are :\n");
+    printf("\nAvailable Devices are :\n");
     for(device = alldevsp ; device != NULL ; device = device->next)
     {
-        // printf("%d. %s - %s\n" , count , device->name , device->description);
-        // if(device->name != NULL)
-        // {
-        //     strcpy(devs[count] , device->name);
-        // }
-        // count++;
-        if(strcmp(device->name, argv[1]) == 0){
-            break;
+        printf("%d. %s - %s\n" , count , device->name , device->description);
+        if(device->name != NULL)
+        {
+            strcpy(devs[count] , device->name);
         }
+        count++;
     }
      
-     if(device == NULL){
-        printf("Unable to find the device! Exiting ...");
-        exit(EXIT_FAILURE);
-     }
     //Ask user which device to sniff
-    //printf("Enter the number of the device you want to sniff : ");
-    //scanf("%d" , &n);
-    devname = argv[1];
+    printf("Enter the number of the device you want to sniff : ");
+    scanf("%d" , &n);
+    devname = devs[n];
      
     //Open the device for sniffing
     printf("Opening device %s for sniffing ... " , devname);
