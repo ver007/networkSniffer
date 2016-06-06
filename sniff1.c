@@ -17,9 +17,10 @@
 #include <pthread.h>
 #include <semaphore.h>
 
-#define BYTES_IN_MB   (1024*1024)
-#define MAX_MAC_COUNT (50)
-#define MAC_LENGTH    (6)
+#define BYTES_IN_MB		(1024*1024)
+#define MB_IN_GB		(1024)
+#define MAX_MAC_COUNT 	(50)
+#define MAC_LENGTH    	(6)
 /*
   Synchronization declarations
 */
@@ -212,31 +213,64 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
     //sleep(2);
     int index;
     u_char mac[MAC_LENGTH];
+	
+	/*
+		Store the size of the packet received.
+	*/
     int size = header->len;
+	
+	
     allData[1] += (size + allData[0]) / BYTES_IN_MB;
     allData[0] = (size + allData[0]) % BYTES_IN_MB;
 
     struct ethhdr *eth = (struct ethhdr *)buffer;
     //printf("%.2X-%.2X-%.2X-%.2X-%.2X-%.2X \n", eth->h_dest[0] , eth->h_dest[1] , eth->h_dest[2] , eth->h_dest[3] , eth->h_dest[4] , eth->h_dest[5] );
     //printf("%d-%d-%d-%d-%d-%d***\n",eth->h_dest[0] , eth->h_dest[1] , eth->h_dest[2] , eth->h_dest[3] , eth->h_dest[4] , eth->h_dest[5] );
-    strncpy(mac,eth->h_dest,MAC_LENGTH);
-    index = isMACExists(mac);
     
+	/*
+		Get the MAC address from the packet header.
+	*/
+	strncpy(mac,eth->h_dest,MAC_LENGTH);
+	/*
+		Check if the MAC exists in the global database variable.
+	*/
+	index = isMACExists(mac);
+    
+	/*
+		Start of critical section: Updating the global database variable that stores 
+		MAC addresses and its data attributes.
+	*/
     sem_wait(&bin_sem);
     if(index < destMacTotal)
     {
+		/*
+			If the MAC exists, update its data attributes.
+		*/
         destMACs[index].data.dataMB += (destMACs[index].data.dataBYTES + size) / BYTES_IN_MB;
-        destMACs[index].data.dataBYTES = (destMACs[index].data.dataBYTES + size) % BYTES_IN_MB;
+		destMACs[index].data.dataGB += (destMACs[index].data.dataMB) / MB_IN_GB;
+		destMACs[index].data.dataMB = (destMACs[index].data.dataMB ) % MB_IN_GB;
+		destMACs[index].data.dataBYTES = (destMACs[index].data.dataBYTES + size) % BYTES_IN_MB;
     }
     else
     {
-        //printf("Adding new MAC\n");
+        /*
+			Adding new MAC to the global database variable. Also initialize the data
+			attributes with the size of the first packet.
+		*/
         strncpy(destMACs[index].mac,mac,MAC_LENGTH);
         destMACs[index].data.dataMB += (destMACs[index].data.dataBYTES + size) / BYTES_IN_MB;
+		destMACs[index].data.dataGB += (destMACs[index].data.dataMB) / MB_IN_GB;
+		destMACs[index].data.dataMB = (destMACs[index].data.dataMB ) % MB_IN_GB;
         destMACs[index].data.dataBYTES = (destMACs[index].data.dataBYTES + size) % BYTES_IN_MB;
         destMacTotal++;
     }
+	
+	/*
+		End of critical section: Updating the global database variable that stores 
+		MAC addresses and its data attributes.
+	*/
     sem_post(&bin_sem);
+	
     //Get the IP Header part of this packet , excluding the ethernet header
     struct iphdr *iph = (struct iphdr*)(buffer + sizeof(struct ethhdr));
     ++total;
