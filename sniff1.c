@@ -45,11 +45,28 @@ SrcMACDataHolder srcMACs[MAX_MAC_COUNT] = {0};
 
 int destMacTotal = 0;
 int srcMacTotal = 0;
+int killSwitch = 0;
 sem_t bin_sem;
 FILE *backUpFile;
+char backUpFileName[] = "log.txt";
 int savesize;
 
+
+pcap_t *handle; //Handle of the device that shall be sniffed
+
+typedef enum{
+    Parsing_Banner,
+    Parsing_MAC,
+    Parsing_GB,
+    Parsing_MB,
+    Parsing_Bytes
+} readFileStates;
+
+
+void *storeData_thread(void *arg);
 void *backUp_thread(void *arg);
+void *killSwitch_thread(void *arg);
+void readMacFromFile(void);
 
 /*
   Networking declarations
@@ -70,17 +87,16 @@ u_int allData[2] = {0,0};
 int main(int argc, char *argv[])
 {
     pcap_if_t *alldevsp , *device;
-    pcap_t *handle; //Handle of the device that shall be sniffed
  
     char errbuf[100] , *devname , devs[100][100];
     int count = 1 , n;
      
 
   /*
-    Setup synchrnization elements
+    Setup synchronization elements
   */
     int res;
-    pthread_t a_thread;
+    pthread_t store_thread, kill_thread;
     void *thread_result;
 
     res = sem_init(&bin_sem, 0, 1);
@@ -88,7 +104,12 @@ int main(int argc, char *argv[])
         perror("Semaphore initialization failed");
         exit(EXIT_FAILURE);
     }
-    res = pthread_create(&a_thread, NULL, backUp_thread, NULL);
+    res = pthread_create(&store_thread, NULL, storeData_thread, NULL);
+    if (res != 0) {
+        perror("Thread creation failed");
+        exit(EXIT_FAILURE);
+    }
+    res = pthread_create(&kill_thread, NULL, killSwitch_thread, NULL);
     if (res != 0) {
         perror("Thread creation failed");
         exit(EXIT_FAILURE);
@@ -141,52 +162,220 @@ int main(int argc, char *argv[])
         exit(1);
     }
     printf("Done\n");
-     
-    // logfile=fopen("log.txt","w");
-    // if(logfile==NULL) 
-    // {
-    //     printf("Unable to create file.");
-    // }
-     
-    //Put the device in sniff loop
+
     pcap_loop(handle , -1 , process_packet , NULL);
     
     printf("\nWaiting for thread to finish...\n");
-    res = pthread_join(a_thread, &thread_result);
+    res = pthread_join(kill_thread, &thread_result);
     if (res != 0) {
         perror("Thread join failed");
         exit(EXIT_FAILURE);
     }
     printf("Thread joined\n");
+
+    res = pthread_join(store_thread, &thread_result);
+    if (res != 0) {
+        perror("Thread join failed");
+        exit(EXIT_FAILURE);
+    }
+
     sem_destroy(&bin_sem);
+    printf("Exiting program\n");
     exit(EXIT_SUCCESS);
     //return 0;   
 }
 
-void *backUp_thread(void *arg) {
+/*
+    Api to read the contents of the file and populate the MAC address database variable
+*/
+void readMacFromFile(void)
+{
+    char ch, strTemp[20] = {0};
+    int i, j_ParseIndex = 0, k_MacIndex = 0;
+    uint32_t totalMac;
+    DestMACDataHolder tempMac;
+
+    FILE * rf = fopen(backUpFileName,"r");
+
+    fscanf(rf, "Total MACs: %d\n\n", &totalMac);
+    destMacTotal = totalMac;
+
+    //printf ("Total number of MACs are: %d", totalMac);
+
+    for ( i = 0 ; i < totalMac ; i++ )
+    {
+        /*
+            Parse MAC address.
+        */
+        while (1){
+            ch = fgetc(rf);
+            strTemp[j_ParseIndex ++] = ch;
+            if( ch == '-')
+            {
+
+                destMACs[i].mac[k_MacIndex ++] = strtoul(strTemp, NULL, 16);
+                j_ParseIndex = 0;
+            }
+
+            if( ch == ':')
+            {
+                destMACs[i].mac[k_MacIndex ++] = strtoul(strTemp, NULL, 16);
+                break;
+            }
+        }
+        printf("***%.2X-%.2X-%.2X-%.2X-%.2X-%.2X:***\n",destMACs[i].mac[0],destMACs[i].mac[1],destMACs[i].mac[2],destMACs[i].mac[3],destMACs[i].mac[4],destMACs[i].mac[5]);
+        j_ParseIndex = 0;
+        k_MacIndex = 0;
+        /*
+            Parse GB.
+        */
+        while ((ch = fgetc(rf)) == ' ')
+            ;
+
+        strTemp[j_ParseIndex ++] = ch;
+
+        while((ch = fgetc(rf)) != '|')
+        {
+            strTemp[j_ParseIndex ++] = ch;
+        }
+
+        destMACs[i].data.dataGB = strtoul(strTemp, NULL, 10);
+        printf("***GB: %d***\t", destMACs[i].data.dataGB);
+        j_ParseIndex = 0;
+
+        /*
+            Parse MB.
+        */
+        while ((ch = fgetc(rf)) == ' ')
+            ;
+        strTemp[j_ParseIndex ++] = ch;
+
+        while((ch = fgetc(rf)) != '|')
+        {
+            strTemp[j_ParseIndex ++] = ch;
+        }
+
+        destMACs[i].data.dataMB = strtoul(strTemp, NULL, 10);
+        printf("***MB: %d***\t", destMACs[i].data.dataMB);
+        j_ParseIndex = 0;
+
+        /*
+            Parse Bytes.
+        */
+        while ((ch = fgetc(rf)) == ' ')
+            ;
+        strTemp[j_ParseIndex ++] = ch;
+
+        while((ch = fgetc(rf)) != 'B')
+        {
+            strTemp[j_ParseIndex ++] = ch;
+        }
+
+        destMACs[i].data.dataBYTES = strtoul(strTemp, NULL, 10);
+        printf("***Bytes: %d***\t", destMACs[i].data.dataBYTES);
+        j_ParseIndex = 0;
+
+        /*
+            Reset variables
+        */
+
+        /*
+            Drop the remaining characters in a line.
+        */
+        while ((ch = fgetc(rf)) != '\n')
+            ;
+
+        /*
+            Assign read MAC address attributes to the global MAC database variable.
+        */ 
+
+    }
+    fclose(rf);
+}
+
+void *killSwitch_thread(void *arg) 
+{
+
+    char ch;
+    
+    while(1)
+    {
+        sleep(2);
+        scanf("%c", &ch);
+
+        if(ch == 'e' || ch == 'E')
+        {
+            printf("Kill Switch Flipped!!\n");
+            pcap_breakloop(handle);
+            killSwitch = 1;
+            break;
+        }
+
+    }
+
+    pthread_exit(NULL);
+}
+
+void *storeData_thread(void *arg) {
     int i;
+
+
+    /*
+        Before anything, read the usage history to sync with the last
+        saved data usage.
+    */
+    sem_wait(&bin_sem);
+    
+    readMacFromFile();
+    
+    sem_post(&bin_sem);
+
+
     while(1)
     {
       sleep(3);
+
+    /*
+        Enter critical section: Updating the global database variable that stores 
+        MAC addresses and its data attributes.
+    */
       sem_wait(&bin_sem);
-      //printf("Saving in file\n");
-      backUpFile=fopen("log.txt","w");
+
+      /*
+            Open the usage history file for writing current data usage.
+      */
+      backUpFile=fopen(backUpFileName,"w");
+
+      printf("Total MACs: %d\n", destMacTotal);
+      fprintf(backUpFile,"Total MACs: %d\n\n", destMacTotal);
       for(i = 0 ; i < destMacTotal ; i++)
       {
         //fprintf(backUpFile, "%s\t", destMACs[i].mac, MAC_LENGTH);
         fprintf(backUpFile,"%.2X-%.2X-%.2X-%.2X-%.2X-%.2X:\t",destMACs[i].mac[0],destMACs[i].mac[1],destMACs[i].mac[2],destMACs[i].mac[3],destMACs[i].mac[4],destMACs[i].mac[5]);
-        fprintf(backUpFile,"%d MB | %d Bytes\n",destMACs[i].data.dataMB, destMACs[i].data.dataBYTES);
+        fprintf(backUpFile,"%d GB | %d MB | %d Bytes\n",destMACs[i].data.dataGB, destMACs[i].data.dataMB, destMACs[i].data.dataBYTES);
 
       }
       
+    /*
+        Exit critical section: Updating the global database variable that stores 
+        MAC addresses and its data attributes.
+    */
       sem_post(&bin_sem);
+
+      /*
+            Current usage written. Close the usage history file.
+      */
       fclose(backUpFile);
+
+      if(killSwitch == 1)
+        break;
     }
     // if(logfile==NULL) 
     // {
     //     printf("Unable to create file.");
     // }
-    pthread_exit(NULL);
+
+        pthread_exit(NULL);
 }
 
 int isMACExists(u_char *mac)
@@ -237,7 +426,7 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
 	index = isMACExists(mac);
     
 	/*
-		Start of critical section: Updating the global database variable that stores 
+		Enter critical section: Updating the global database variable that stores 
 		MAC addresses and its data attributes.
 	*/
     sem_wait(&bin_sem);
@@ -266,7 +455,7 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
     }
 	
 	/*
-		End of critical section: Updating the global database variable that stores 
+		Exit critical section: Updating the global database variable that stores 
 		MAC addresses and its data attributes.
 	*/
     sem_post(&bin_sem);
