@@ -223,9 +223,10 @@ void readMacFromFile(void)
                 break;
             }
         }
-        printf("***%.2X-%.2X-%.2X-%.2X-%.2X-%.2X:***\n",destMACs[i].mac[0],destMACs[i].mac[1],destMACs[i].mac[2],destMACs[i].mac[3],destMACs[i].mac[4],destMACs[i].mac[5]);
+        //printf("***%.2X-%.2X-%.2X-%.2X-%.2X-%.2X:***\n",destMACs[i].mac[0],destMACs[i].mac[1],destMACs[i].mac[2],destMACs[i].mac[3],destMACs[i].mac[4],destMACs[i].mac[5]);
         j_ParseIndex = 0;
         k_MacIndex = 0;
+
         /*
             Parse GB.
         */
@@ -240,7 +241,7 @@ void readMacFromFile(void)
         }
 
         destMACs[i].data.dataGB = strtoul(strTemp, NULL, 10);
-        printf("***GB: %d***\t", destMACs[i].data.dataGB);
+        //printf("***GB: %d***\t", destMACs[i].data.dataGB);
         j_ParseIndex = 0;
 
         /*
@@ -256,7 +257,7 @@ void readMacFromFile(void)
         }
 
         destMACs[i].data.dataMB = strtoul(strTemp, NULL, 10);
-        printf("***MB: %d***\t", destMACs[i].data.dataMB);
+        //printf("***MB: %d***\t", destMACs[i].data.dataMB);
         j_ParseIndex = 0;
 
         /*
@@ -272,22 +273,14 @@ void readMacFromFile(void)
         }
 
         destMACs[i].data.dataBYTES = strtoul(strTemp, NULL, 10);
-        printf("***Bytes: %d***\t", destMACs[i].data.dataBYTES);
+        //printf("***Bytes: %d***\t", destMACs[i].data.dataBYTES);
         j_ParseIndex = 0;
-
-        /*
-            Reset variables
-        */
 
         /*
             Drop the remaining characters in a line.
         */
         while ((ch = fgetc(rf)) != '\n')
             ;
-
-        /*
-            Assign read MAC address attributes to the global MAC database variable.
-        */ 
 
     }
     fclose(rf);
@@ -297,20 +290,36 @@ void *killSwitch_thread(void *arg)
 {
 
     char ch;
-    
+    FILE *rf = NULL;
+
+    /*
+        If the switch is already on, open the file and write 1 to flip it off.
+    */
+    rf = fopen("kill.swt","w");
+    fprintf(rf,"0");
+    fclose(rf);
+    rf = NULL;
+
     while(1)
     {
-        sleep(2);
-        scanf("%c", &ch);
+        sleep(5);
+        rf = fopen("kill.swt","r");
 
-        if(ch == 'e' || ch == 'E')
+        /*
+            This is to make sure that file is read only if it exists.
+        */
+        if (rf == NULL)
+            continue;
+        
+        if(fgetc(rf) == '1')
         {
-            printf("Kill Switch Flipped!!\n");
-            pcap_breakloop(handle);
-            killSwitch = 1;
-            break;
+                //printf("Kill Switch Flipped!!\n");
+                pcap_breakloop(handle);
+                killSwitch = 1;
+                break;   
         }
-
+        fclose(rf);
+        rf = NULL;
     }
 
     pthread_exit(NULL);
@@ -346,7 +355,7 @@ void *storeData_thread(void *arg) {
       */
       backUpFile=fopen(backUpFileName,"w");
 
-      printf("Total MACs: %d\n", destMacTotal);
+      // printf("Total MACs: %d\n", destMacTotal);
       fprintf(backUpFile,"Total MACs: %d\n\n", destMacTotal);
       for(i = 0 ; i < destMacTotal ; i++)
       {
@@ -370,24 +379,17 @@ void *storeData_thread(void *arg) {
       if(killSwitch == 1)
         break;
     }
-    // if(logfile==NULL) 
-    // {
-    //     printf("Unable to create file.");
-    // }
-
-        pthread_exit(NULL);
+    
+    pthread_exit(NULL);
 }
 
 int isMACExists(u_char *mac)
 {
-    //int result = 0;
     int i, j;
     for( j = 0; j < destMacTotal ; j++)
     {
-      //printf("%d-%d-%d-%d-%d-%d *\n%d-%d-%d-%d-%d-%d\n",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5],destMACs[j].mac[0],destMACs[j].mac[1],destMACs[j].mac[2],destMACs[j].mac[3],destMACs[j].mac[4],destMACs[j].mac[5]);
       for(i = 0; i < MAC_LENGTH ; i++)
       {
-          //printf("===%d===",destMACs[j].mac[i] ^ mac[i]);
           if((destMACs[j].mac[i] ^ mac[i]) != 0)
               break;
       }
