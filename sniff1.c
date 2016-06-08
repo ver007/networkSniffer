@@ -48,7 +48,8 @@ int srcMacTotal = 0;
 int killSwitch = 0;
 sem_t bin_sem;
 FILE *backUpFile;
-char backUpFileName[] = "log.txt";
+char backUpFileName[] = "/home/codex/developer/networkSniffer/log.txt";
+char killSwitchFileName[] = "/home/codex/developer/networkSniffer/kill.swt";
 int savesize;
 
 
@@ -302,7 +303,7 @@ void *killSwitch_thread(void *arg)
     /*
         If the switch is already on, open the file and write 1 to flip it off.
     */
-    rf = fopen("kill.swt","w");
+    rf = fopen(killSwitchFileName,"w");
     fprintf(rf,"0");
     fclose(rf);
     rf = NULL;
@@ -310,7 +311,7 @@ void *killSwitch_thread(void *arg)
     while(1)
     {
         sleep(5);
-        rf = fopen("kill.swt","r");
+        rf = fopen(killSwitchFileName,"r");
 
         /*
             This is to make sure that file is read only if it exists.
