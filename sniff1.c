@@ -197,6 +197,13 @@ void readMacFromFile(void)
 
     FILE * rf = fopen(backUpFileName,"r");
 
+    /*
+        If there's no file, we have to start building database. So return to the calling
+        and resume normal operation.
+    */
+    if (rf == NULL)
+        return;
+
     fscanf(rf, "Total MACs: %d\n\n", &totalMac);
     destMacTotal = totalMac;
 
@@ -310,7 +317,7 @@ void *killSwitch_thread(void *arg)
         */
         if (rf == NULL)
             continue;
-        
+
         if(fgetc(rf) == '1')
         {
                 //printf("Kill Switch Flipped!!\n");
