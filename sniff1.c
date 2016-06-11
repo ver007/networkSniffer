@@ -394,16 +394,28 @@ void *storeData_thread(void *arg) {
 int isMACExists(u_char *mac)
 {
     int i, j;
-    for( j = 0; j < destMacTotal ; j++)
-    {
-      for(i = 0; i < MAC_LENGTH ; i++)
-      {
-          if((destMACs[j].mac[i] ^ mac[i]) != 0)
-              break;
-      }
-      if(i == MAC_LENGTH)
-          break;
-    }
+
+   // printf("%x,%x,%x\n",mac[0],mac[1],mac[2]);
+
+    if((mac[0] == 0x33) && (mac[1] == 0x33) && (mac[2] == 0xff))
+	{
+//		printf("N");
+		j = -1;
+	}
+    else
+	{
+//		printf("V");
+	        for( j = 0; j < destMacTotal ; j++)
+	        {
+	          for(i = 0; i < MAC_LENGTH ; i++)
+        	  {
+	              if((destMACs[j].mac[i] ^ mac[i]) != 0)
+        	          break;
+	          }
+        	  if(i == MAC_LENGTH)
+	              break;
+        	}
+	}
     return j;
 }
  
@@ -439,6 +451,8 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
 		Enter critical section: Updating the global database variable that stores 
 		MAC addresses and its data attributes.
 	*/
+    if(index > -1)
+    {
     sem_wait(&bin_sem);
     if(index < destMacTotal)
     {
@@ -469,7 +483,7 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
 		MAC addresses and its data attributes.
 	*/
     sem_post(&bin_sem);
-	
+    }
     //Get the IP Header part of this packet , excluding the ethernet header
     struct iphdr *iph = (struct iphdr*)(buffer + sizeof(struct ethhdr));
     ++total;
