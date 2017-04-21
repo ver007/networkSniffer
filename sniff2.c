@@ -17,10 +17,11 @@
 #include <pthread.h>
 #include <semaphore.h>
 
-#define BYTES_IN_MB		(1024*1024)
-#define MB_IN_GB		(1024)
-#define MAX_MAC_COUNT 	(50)
-#define MAC_LENGTH    	(6)
+#define BYTES_IN_MB			(1024*1024)
+#define MB_IN_GB			(1024)
+#define MAX_MAC_COUNT 		(50)
+#define MAC_LENGTH    		(6)
+#define MAX_CAPTURED_MAC	(10)
 /*
   Synchronization declarations
 */
@@ -40,8 +41,20 @@ typedef struct{
   dataHolder data;
 }SrcMACDataHolder;
 
+typedef struct{
+  char mac[MAC_LENGTH];
+  uint32_t capturedSize;
+}CapturedMAC;
+
+typedef struct{
+	CapturedMAC arrCapturedMACs[MAX_CAPTURED_MAC];
+	uint32_t front;
+	uint32_t size;
+}CapturedMACQueue;
+
 DestMACDataHolder destMACs[MAX_MAC_COUNT] = {0};
 SrcMACDataHolder srcMACs[MAX_MAC_COUNT] = {0};
+CapturedMACQueue capturedMacQ = {0};
 
 int destMacTotal = 0;
 int srcMacTotal = 0;
@@ -293,31 +306,31 @@ void *killSwitch_thread(void *arg)
     /*
         If the switch is already on, open the file and write 1 to flip it off.
     */
-    rf = fopen(killSwitchFileName,"w");
-    fprintf(rf,"0");
-    fclose(rf);
-    rf = NULL;
+    // rf = fopen(killSwitchFileName,"w");
+    // fprintf(rf,"0");
+    // fclose(rf);
+    // rf = NULL;
 
     while(1)
     {
         sleep(5);
-        rf = fopen(killSwitchFileName,"r");
+        // rf = fopen(killSwitchFileName,"r");
 
-        /*
-            This is to make sure that file is read only if it exists.
-        */
-        if (rf == NULL)
-            continue;
+        // /*
+        //     This is to make sure that file is read only if it exists.
+        // */
+        // if (rf == NULL)
+        //     continue;
 
-        if(fgetc(rf) == '1')
-        {
-                //printf("Kill Switch Flipped!!\n");
-                pcap_breakloop(handle);
-                killSwitch = 1;
-                break;   
-        }
-        fclose(rf);
-        rf = NULL;
+        // if(fgetc(rf) == '1')
+        // {
+        //         //printf("Kill Switch Flipped!!\n");
+        //         pcap_breakloop(handle);
+        //         killSwitch = 1;
+        //         break;   
+        // }
+        // fclose(rf);
+        //rf = NULL;
     }
 
     pthread_exit(NULL);
@@ -331,11 +344,11 @@ void *storeData_thread(void *arg) {
         Before anything, read the usage history to sync with the last
         saved data usage.
     */
-    sem_wait(&bin_sem);
+    // sem_wait(&bin_sem);
     
-    readMacFromFile();
+    // readMacFromFile();
     
-    sem_post(&bin_sem);
+    // sem_post(&bin_sem);
 
 
     while(1)
@@ -346,36 +359,36 @@ void *storeData_thread(void *arg) {
         Enter critical section: Updating the global database variable that stores 
         MAC addresses and its data attributes.
     */
-      sem_wait(&bin_sem);
+    //   sem_wait(&bin_sem);
 
-      /*
-            Open the usage history file for writing current data usage.
-      */
-      backUpFile=fopen(backUpFileName,"w");
+    //   /*
+    //         Open the usage history file for writing current data usage.
+    //   */
+    //   backUpFile=fopen(backUpFileName,"w");
 
-      // printf("Total MACs: %d\n", destMacTotal);
-      fprintf(backUpFile,"Total MACs: %d\n\n", destMacTotal);
-      for(i = 0 ; i < destMacTotal ; i++)
-      {
-        //fprintf(backUpFile, "%s\t", destMACs[i].mac, MAC_LENGTH);
-        fprintf(backUpFile,"%.2X-%.2X-%.2X-%.2X-%.2X-%.2X:\t",destMACs[i].mac[0],destMACs[i].mac[1],destMACs[i].mac[2],destMACs[i].mac[3],destMACs[i].mac[4],destMACs[i].mac[5]);
-        fprintf(backUpFile,"%d GB | %d MB | %d Bytes\n",destMACs[i].data.dataGB, destMACs[i].data.dataMB, destMACs[i].data.dataBYTES);
+    //   // printf("Total MACs: %d\n", destMacTotal);
+    //   fprintf(backUpFile,"Total MACs: %d\n\n", destMacTotal);
+    //   for(i = 0 ; i < destMacTotal ; i++)
+    //   {
+    //     //fprintf(backUpFile, "%s\t", destMACs[i].mac, MAC_LENGTH);
+    //     fprintf(backUpFile,"%.2X-%.2X-%.2X-%.2X-%.2X-%.2X:\t",destMACs[i].mac[0],destMACs[i].mac[1],destMACs[i].mac[2],destMACs[i].mac[3],destMACs[i].mac[4],destMACs[i].mac[5]);
+    //     fprintf(backUpFile,"%d GB | %d MB | %d Bytes\n",destMACs[i].data.dataGB, destMACs[i].data.dataMB, destMACs[i].data.dataBYTES);
 
-      }
+    //   }
       
-    /*
-        Exit critical section: Updating the global database variable that stores 
-        MAC addresses and its data attributes.
-    */
-      sem_post(&bin_sem);
+    // /*
+    //     Exit critical section: Updating the global database variable that stores 
+    //     MAC addresses and its data attributes.
+    // */
+    //   sem_post(&bin_sem);
 
-      /*
-            Current usage written. Close the usage history file.
-      */
-      fclose(backUpFile);
+    //   /*
+    //         Current usage written. Close the usage history file.
+    //   */
+    //   fclose(backUpFile);
 
-      if(killSwitch == 1)
-        break;
+    //   if(killSwitch == 1)
+    //     break;
     }
     
     pthread_exit(NULL);
@@ -383,7 +396,19 @@ void *storeData_thread(void *arg) {
 
 void *dummyProcess_thread(void * arg)
 {
+	CapturedMAC newMac;
 
+	while(1)
+	{
+		sem_wait(&bin_Sem);
+		if(capturedMacQ.size > 0)
+		{
+			memncpy(newMac,capturedMacQ[front]);
+		}
+		sem_post(&bin_Sem);
+	}
+
+	pthread_exit(NULL);
 }
 
 int isMACExists(u_char *mac)
@@ -424,60 +449,61 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
 		Store the size of the packet received.
 	*/
     int size = header->len;
-	
-	
-    allData[1] += (size + allData[0]) / BYTES_IN_MB;
-    allData[0] = (size + allData[0]) % BYTES_IN_MB;
 
     struct ethhdr *eth = (struct ethhdr *)buffer;
-    //printf("%.2X-%.2X-%.2X-%.2X-%.2X-%.2X \n", eth->h_dest[0] , eth->h_dest[1] , eth->h_dest[2] , eth->h_dest[3] , eth->h_dest[4] , eth->h_dest[5] );
-    //printf("%d-%d-%d-%d-%d-%d***\n",eth->h_dest[0] , eth->h_dest[1] , eth->h_dest[2] , eth->h_dest[3] , eth->h_dest[4] , eth->h_dest[5] );
-    
+        
 	/*
-		Get the MAC address from the packet header.
+		Get the MAC address from the packet header and store it in the MAC Queue.
 	*/
-	strncpy(mac,eth->h_dest,MAC_LENGTH);
+	sem_wait(&bin_sem);
+
+	strncpy(capturedMacQ.arrCapturedMACs[capturedMacQ.front],eth->h_dest,MAC_LENGTH);
+	capturedMacQ.front = (front + 1) % MAX_CAPTURED_MAC;
+	capturedMacQ.size += 1;
+	
+	sem_post(&bin_sem);
+
 	/*
 		Check if the MAC exists in the global database variable.
 	*/
-	index = isMACExists(mac);
+	// index = isMACExists(mac);
     
-	/*
-		Enter critical section: Updating the global database variable that stores 
-		MAC addresses and its data attributes.
-	*/
-    if(index > -1)
-    {
-    sem_wait(&bin_sem);
-    if(index < destMacTotal)
-    {
-		/*
-			If the MAC exists, update its data attributes.
-		*/
-        destMACs[index].data.dataMB += (destMACs[index].data.dataBYTES + size) / BYTES_IN_MB;
-		destMACs[index].data.dataGB += (destMACs[index].data.dataMB) / MB_IN_GB;
-		destMACs[index].data.dataMB = (destMACs[index].data.dataMB ) % MB_IN_GB;
-		destMACs[index].data.dataBYTES = (destMACs[index].data.dataBYTES + size) % BYTES_IN_MB;
-    }
-    else
-    {
-        /*
-			Adding new MAC to the global database variable. Also initialize the data
-			attributes with the size of the first packet.
-		*/
-        strncpy(destMACs[index].mac,mac,MAC_LENGTH);
-        destMACs[index].data.dataMB += (destMACs[index].data.dataBYTES + size) / BYTES_IN_MB;
-		destMACs[index].data.dataGB += (destMACs[index].data.dataMB) / MB_IN_GB;
-		destMACs[index].data.dataMB = (destMACs[index].data.dataMB ) % MB_IN_GB;
-        destMACs[index].data.dataBYTES = (destMACs[index].data.dataBYTES + size) % BYTES_IN_MB;
-        destMacTotal++;
-    }
+	// /*
+	// 	Enter critical section: Updating the global database variable that stores 
+	// 	MAC addresses and its data attributes.
+	// */
+ //    if(index > -1)
+ //    {
+ //    sem_wait(&bin_sem);
+ //    if(index < destMacTotal)
+ //    {
+	// 	/*
+	// 		If the MAC exists, update its data attributes.
+	// 	*/
+ //        destMACs[index].data.dataMB += (destMACs[index].data.dataBYTES + size) / BYTES_IN_MB;
+	// 	destMACs[index].data.dataGB += (destMACs[index].data.dataMB) / MB_IN_GB;
+	// 	destMACs[index].data.dataMB = (destMACs[index].data.dataMB ) % MB_IN_GB;
+	// 	destMACs[index].data.dataBYTES = (destMACs[index].data.dataBYTES + size) % BYTES_IN_MB;
+ //    }
+ //    else
+ //    {
+        
+	// 		Adding new MAC to the global database variable. Also initialize the data
+	// 		attributes with the size of the first packet.
+		
+ //        strncpy(destMACs[index].mac,mac,MAC_LENGTH);
+ //        destMACs[index].data.dataMB += (destMACs[index].data.dataBYTES + size) / BYTES_IN_MB;
+	// 	destMACs[index].data.dataGB += (destMACs[index].data.dataMB) / MB_IN_GB;
+	// 	destMACs[index].data.dataMB = (destMACs[index].data.dataMB ) % MB_IN_GB;
+ //        destMACs[index].data.dataBYTES = (destMACs[index].data.dataBYTES + size) % BYTES_IN_MB;
+ //        destMacTotal++;
+ //    }
 	
-	/*
-		Exit critical section: Updating the global database variable that stores 
-		MAC addresses and its data attributes.
-	*/
-    sem_post(&bin_sem);
-    }
+	// /*
+	// 	Exit critical section: Updating the global database variable that stores 
+	// 	MAC addresses and its data attributes.
+	// */
+ //    sem_post(&bin_sem);
+ //    }
 }
  
