@@ -48,8 +48,8 @@ int srcMacTotal = 0;
 int killSwitch = 0;
 sem_t bin_sem;
 FILE *backUpFile;
-char backUpFileName[] = "/home/sudhakar/batcave/developer/beaglebone/sniffer/log.txt";
-char killSwitchFileName[] = "/home/sudhakar/batcave/developer/beaglebone/sniffer/kill.swt";
+char backUpFileName[] = "";
+char killSwitchFileName[] = "";
 int savesize;
 
 
